@@ -1,9 +1,8 @@
-(ns skitter.core
-  (:refer-clojure :exclude [resolve apply eval destructure])
+(ns skitter.runtime
+  (:refer-clojure :exclude [resolve eval destructure])
   (:require
    [clojure.spec.alpha :as s]
-   [farolero.core :as far :refer [handler-case handler-bind restart-case]])
-  (:gen-class))
+   [farolero.core :as far :refer [handler-case handler-bind restart-case]]))
 
 (def expr-types #{:expr :call :prompt :test :def :eval-val :ns-pop
                   :env-pop :env-push :env-extend
@@ -95,7 +94,7 @@
                             :symbol sym
                             :current-ns current-ns
                             :env local-env))
-    (::far/use-value [v] v)))
+                (::far/use-value [v] v)))
 (s/fdef resolve
   :args (s/cat :current-ns symbol?
                :bindings ::bindings
@@ -134,17 +133,17 @@
 
 (defmethod eval :list
   [cont expr]
-  (clojure.core/apply update cont ::expr-stack conj
-                      [:call (count expr)]
-                      (map (fn [expr] [:expr expr])
-                           (reverse
-                            (if (macro? (let [[op & args] expr]
-                                          (cond
-                                            (symbol? op) (resolve (first (::ns cont)) (::bindings cont)
-                                                                  (first (filter map? (::env-stack cont))) op)
-                                            :else op)))
-                              (cons (first expr) (map #(list 'quote %) (next expr)))
-                              expr)))))
+  (apply update cont ::expr-stack conj
+         [:call (count expr)]
+         (map (fn [expr] [:expr expr])
+              (reverse
+               (if (macro? (let [[op & args] expr]
+                             (cond
+                               (symbol? op) (resolve (first (::ns cont)) (::bindings cont)
+                                                     (first (filter map? (::env-stack cont))) op)
+                               :else op)))
+                 (cons (first expr) (map #(list 'quote %) (next expr)))
+                 expr)))))
 
 (defmethod eval :sym
   [cont expr]
@@ -175,15 +174,15 @@
         exprs (concat (list* [:env-push (first (filter map? (::env-stack cont)))] bindings)
                       (map (fn [expr] [:expr expr]) body)
                       '([:env-pop]))]
-    (clojure.core/apply update cont ::expr-stack conj (reverse exprs))))
+    (apply update cont ::expr-stack conj (reverse exprs))))
 
 (defmethod eval 'binding
   [cont expr]
   (far/assert (vector? (second expr)) [] "binding with a non-vector binding")
   (far/assert (even? (count (second expr))) [] "binding with a non-even binding vector")
   (far/assert (every? #(handler-case (resolve (first (::ns cont)) (::bindings cont) nil %)
-                         (:no-error [_] true)
-                         (::far/error [& _] false))
+                                     (:no-error [_] true)
+                                     (::far/error [& _] false))
                       (map first (partition 2 (second expr))))
               []
               "every symbol being bound to resolves")
@@ -194,7 +193,7 @@
         exprs (concat (list* [:binding-push] bindings)
                       (map (fn [expr] [:expr expr]) body)
                       '([:binding-pop]))]
-    (clojure.core/apply update cont ::expr-stack conj (reverse exprs))))
+    (apply update cont ::expr-stack conj (reverse exprs))))
 
 (defmethod eval 'if
   [cont expr]
@@ -228,7 +227,7 @@
         new-env (concat (if (map? env)
                           [(assoc env cc-sym saved-cont)]
                           [(assoc (first (filter (complement map?) envs)) cc-sym saved-cont) env])
-                      envs)]
+                        envs)]
     (assoc cont
            ::env-stack new-env
            ::expr-stack (cons [:expr (cons 'do body)] escape-exprs)
@@ -246,7 +245,7 @@
                                (assoc m k (cons [:prompt prompt-name] v)))
                              {} %)))))
 
-(defmulti apply
+(defmulti call
   (fn [cont f args]
     (if-not (symbol? f)
       [:lit (second f)]
@@ -265,7 +264,7 @@
                      (next args)))
       acc)))
 
-(defmethod apply '[:lit clo]
+(defmethod call '[:lit clo]
   [cont [_ _ ns closed-env arglist & body] args]
   (let [local-env (merge closed-env
                          (destructure arglist args))
@@ -275,7 +274,7 @@
         (update ::env-stack conj local-env)
         (update ::expr-stack conj [:env-pop] [:expr (cons 'do body)]))))
 
-(defmethod apply '[:lit mac]
+(defmethod call '[:lit mac]
   [cont [_ _ ns closed-env arglist & body :as macro] args]
   (let [local-env (merge closed-env
                          (destructure arglist args))
@@ -287,7 +286,7 @@
         (update ::env-stack conj (merge local-env env))
         (update ::expr-stack conj [:eval-val nil] [:env-pop] [:expr (cons 'do body)]))))
 
-(defmethod apply '[:lit cont]
+(defmethod call '[:lit cont]
   [cont [_ _ called-cont] args]
   (assoc cont
          ::ns (concat (::ns called-cont) (::ns cont))
@@ -300,61 +299,6 @@
                      (::bindings called-cont)
                      (::bindings cont))))
 
-(defmacro defbuiltin
-  [name reexport? cont-sym arglist & body]
-  `(do
-     (defmethod apply '~name
-       [cont# _# args#]
-       (-> cont#
-           (update ::value-stack
-                   conj [:val (let [~cont-sym cont#
-                                    ~arglist args#]
-                                ~@body)])
-           (update ::ns conj nil)))
-     (swap! global-env assoc-in '[skitter.lang ::ns-map ~name] '~name)
-     (swap! global-env update-in '[skitter.lang ::ns-publics] (fnil conj #{}) '~name)
-     ~(if reexport?
-        `(do
-           (swap! global-env assoc-in '[skitter.core ::reexports ~name] 'skitter.lang)
-           (swap! global-env update-in '[skitter.core ::ns-publics] (fnil conj #{}) '~name))
-        `(swap! global-env assoc-in '[skitter.core ::ns-map ~name] '~name))))
-
-(defbuiltin do true
-  _ [& args]
-  (last args))
-
-(defbuiltin cons true
-  _ [& args]
-  (concat (butlast args) (last args)))
-
-(defbuiltin add false
-  _ [& args]
-  (reduce + args))
-
-(defbuiltin sub false
-  _ [& args]
-  (reduce - args))
-
-(defbuiltin reexport true
-  cont [export-map public?]
-  (run! (fn [[ns syms]]
-          (run! (fn [sym]
-                  (swap! global-env assoc-in [(first (::ns cont)) ::reexports sym] ns)
-                  (when public?
-                    (swap! global-env update-in [(first (::ns cont)) ::ns-publics] conj sym)))
-                syms))
-        export-map)
-  nil)
-
-(defbuiltin reexport-all true
-  cont [export-ns public?]
-  (run! (fn [sym]
-          (swap! global-env assoc-in [(first (::ns cont)) ::reexports sym] export-ns)
-          (when public?
-            (swap! global-env update-in [(first (::ns cont)) ::ns-publics] conj sym)))
-        (get-in @global-env [export-ns ::ns-publics]))
-  nil)
-
 (defmethod pop-expr :call
   [cont]
   (let [{::keys [value-stack] [[_ arg-count] & expr-stack] ::expr-stack} cont
@@ -362,10 +306,10 @@
         _ (far/assert (every? (comp #{:val} first) form) [] "all the arguments to a function are values")
         form (map second form)
         value-stack (nthnext value-stack arg-count)]
-    (apply (assoc cont
-                  ::expr-stack (cons [:ns-pop] expr-stack)
-                  ::value-stack value-stack)
-           (first form) (next form))))
+    (call (assoc cont
+                 ::expr-stack (cons [:ns-pop] expr-stack)
+                 ::value-stack value-stack)
+          (first form) (next form))))
 
 (defmethod pop-expr :prompt
   [cont]
@@ -488,7 +432,3 @@
     (far/assert (= 1 (count (::value-stack cont))) [] "there's only one item left on the value stack at the end")
     (far/assert (#{:val} (first (first (::value-stack cont)))) [] "the last item on the value stack is a value")
     (second (first (::value-stack cont)))))
-
-(defn -main
-  [& args]
-  )
