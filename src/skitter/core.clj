@@ -166,8 +166,8 @@
 
 (defmethod eval 'let
   [cont expr]
-  (far/assert (vector? (second expr)) "let with a non-vector binding")
-  (far/assert (even? (count (second expr))) "let with a non-even binding vector")
+  (far/assert (vector? (second expr)) [] "let with a non-vector binding")
+  (far/assert (even? (count (second expr))) [] "let with a non-even binding vector")
   (let [[bindings & body] (next expr)
         bindings (mapcat (fn [[sym expr]]
                            [[:expr expr] [:env-extend sym]])
@@ -179,8 +179,8 @@
 
 (defmethod eval 'binding
   [cont expr]
-  (far/assert (vector? (second expr)) "binding with a non-vector binding")
-  (far/assert (even? (count (second expr))) "binding with a non-even binding vector")
+  (far/assert (vector? (second expr)) [] "binding with a non-vector binding")
+  (far/assert (even? (count (second expr))) [] "binding with a non-even binding vector")
   (far/assert (every? #(handler-case (resolve (first (::ns cont)) (::bindings cont) nil %)
                          (:no-error [_] true)
                          (::far/error [& _] false))
@@ -359,7 +359,7 @@
   [cont]
   (let [{::keys [value-stack] [[_ arg-count] & expr-stack] ::expr-stack} cont
         form (reverse (take arg-count value-stack))
-        _ (far/assert (every? (comp #{:val} first) form) "all the arguments to a function are values")
+        _ (far/assert (every? (comp #{:val} first) form) [] "all the arguments to a function are values")
         form (map second form)
         value-stack (nthnext value-stack arg-count)]
     (apply (assoc cont
@@ -375,6 +375,7 @@
         (split-with (complement #{[:prompt prompt-name]}) value-stack)]
     (far/assert (and (= :prompt val-type)
                      (= prompt-name val))
+                []
                 "the prompts are the same")
     (assoc cont
            ::expr-stack expr-stack
@@ -402,13 +403,14 @@
   [cont]
   (let [{[[_ sym]] ::expr-stack
          [[val-type val]] ::value-stack} cont]
-    (far/assert (#{:val} val-type) "the environment is extending with a value")
+    (far/assert (#{:val} val-type) [] "the environment is extending with a value")
     (-> cont
         (update ::expr-stack next)
         (update ::value-stack next)
         (update ::env-stack
                 (fn [[env & envs]]
                   (far/assert (map? env)
+                              []
                               "a prompt isn't between making a value and saving it to the environment")
                   (cons (assoc env sym val) envs))))))
 
@@ -430,7 +432,7 @@
   [cont]
   (let [{[[_ sym]] ::expr-stack
          [[val-type val]] ::value-stack} cont]
-    (far/assert (#{:val} val-type) "the binding is being set with a value")
+    (far/assert (#{:val} val-type) [] "the binding is being set with a value")
     (-> cont
         (update ::expr-stack next)
         (update ::value-stack next)
@@ -441,7 +443,7 @@
   [cont]
   (let [{[[_ then else] & expr-stack] ::expr-stack
          [[val-type val] & value-stack] ::value-stack} cont]
-    (far/assert (#{:val} val-type) "the test is being run on a value")
+    (far/assert (#{:val} val-type) [] "the test is being run on a value")
     (-> cont
         (update ::expr-stack next)
         (update ::expr-stack conj [:expr (if val then else)])
@@ -450,7 +452,7 @@
 (defmethod pop-expr :eval-val
   [cont]
   (let [{[[val-type val] & value-stack] ::value-stack ::keys [expr-stack]} cont]
-    (far/assert (#{:val} val-type) "the value being evaluated is a value")
+    (far/assert (#{:val} val-type) [] "the value being evaluated is a value")
     (-> cont
         (assoc ::value-stack value-stack)
         (update ::expr-stack next)
@@ -461,7 +463,7 @@
   (let [{[[_ var-name]] ::expr-stack
          [[val-type val] & value-stack] ::value-stack} cont
         sym (symbol (name var-name))]
-    (far/assert (#{:val} val-type) "the value being saved to a def is a value")
+    (far/assert (#{:val} val-type) [] "the value being saved to a def is a value")
     (swap! global-env #(cond-> %
                          (not (:private (meta sym))) (update-in [(first (::ns cont)) ::ns-publics] (fnil conj #{}) sym)
                          :always (assoc-in [(first (::ns cont)) ::ns-map sym] val)))
@@ -484,8 +486,8 @@
           (if (seq (::expr-stack cont))
             (recur (pop-expr cont))
             cont))]
-    (far/assert (= 1 (count (::value-stack cont))) "there's only one item left on the value stack at the end")
-    (far/assert (#{:val} (first (first (::value-stack cont)))) "the last item on the value stack is a value")
+    (far/assert (= 1 (count (::value-stack cont))) [] "there's only one item left on the value stack at the end")
+    (far/assert (#{:val} (first (first (::value-stack cont)))) [] "the last item on the value stack is a value")
     (second (first (::value-stack cont)))))
 
 (defn -main
