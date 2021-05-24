@@ -227,7 +227,7 @@
         [env & envs] (::env-stack cont)
         new-env (concat (if (map? env)
                           [(assoc env cc-sym saved-cont)]
-                          [{cc-sym saved-cont} env])
+                          [(assoc (first (filter (complement map?) envs)) cc-sym saved-cont) env])
                       envs)]
     (assoc cont
            ::env-stack new-env
@@ -409,10 +409,9 @@
         (update ::value-stack next)
         (update ::env-stack
                 (fn [[env & envs]]
-                  (far/assert (map? env)
-                              []
-                              "a prompt isn't between making a value and saving it to the environment")
-                  (cons (assoc env sym val) envs))))))
+                  (if (map? env)
+                    (cons (assoc env sym val) envs)
+                    (concat [(assoc (first (drop-while (complement map?) envs)) sym val) env] envs)))))))
 
 (defmethod pop-expr :binding-pop
   [cont]
