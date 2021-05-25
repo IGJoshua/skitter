@@ -63,3 +63,7 @@
             (swap! r/global-env update-in [(first (::r/ns cont)) ::r/ns-publics] conj sym)))
         (get-in @r/global-env [export-ns ::r/ns-publics]))
   nil)
+
+(defbuiltin eval true
+  cont [to-eval]
+  (r/run-expr (first (::r/ns cont)) to-eval))
