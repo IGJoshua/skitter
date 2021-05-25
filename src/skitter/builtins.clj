@@ -5,7 +5,7 @@
 (defmacro defbuiltin
   [name reexport? cont-sym arglist & body]
   `(do
-     (defmethod r/apply '~name
+     (defmethod r/call '~name
        [cont# _# args#]
        (-> cont#
            (update ::value-stack
