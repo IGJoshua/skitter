@@ -67,3 +67,14 @@
 (defbuiltin eval true
   cont [to-eval]
   (r/run-expr (first (::r/ns cont)) to-eval))
+
+(defcall apply true
+  [cont _ [f & args]]
+  (let [args (map (fn [arg] [:val arg]) (apply list* args))]
+    (-> cont
+        (update ::r/value-stack
+                conj [:val f])
+        (update ::r/value-stack
+                into args)
+        (update ::r/expr-stack
+                conj [:call (inc (count args))]))))
