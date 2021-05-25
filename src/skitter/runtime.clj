@@ -300,8 +300,9 @@
   [cont [_ _ ns closed-env arglist & body :as macro] args]
   (let [local-env (merge closed-env
                          (destructure arglist args))
-        env {'&env (first (filter map? (::env-stack cont)))
-             '&form (cons macro args)}
+        env {'&env (or (first (filter map? (::env-stack cont))) {})
+             '&form (cons macro args)
+             '&ns (first (::ns cont))}
         {::keys [expr-stack]} cont]
     (-> cont
         (update ::ns conj ns)
