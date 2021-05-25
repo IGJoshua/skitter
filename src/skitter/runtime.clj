@@ -65,36 +65,58 @@
 
 (defonce global-env (atom {}))
 
+(defn- follow-reexports
+  [globals current-ns sym]
+  (loop [ns current-ns]
+    (let [in-ns (get-in globals [ns ::ns-map sym] ::not-found)
+          reexport-ns (get-in globals [ns ::reexports sym] ::not-found)]
+      (cond
+        (not= ::not-found in-ns) in-ns
+        (not= ::not-found reexport-ns) (recur reexport-ns)
+        :else (far/error ::bad-publics
+                         :symbol sym
+                         :current-ns current-ns
+                         :ns-publics (get-in globals [current-ns ::ns-publics])
+                         :reexports (get-in globals [current-ns ::reexports])
+                         :ns-map (get-in globals [current-ns ::ns-map]))))))
+(s/fdef follow-reexports
+  :args (s/cat :globals ::global-env
+               :current-ns symbol?
+               :sym symbol?))
+
+(defn- in-ns?
+  [ns sym]
+  (or (contains? (get ns ::ns-map) sym)
+      (contains? (get ns ::reexports) sym)))
+(s/fdef in-ns?
+  :args (s/cat :ns ::namespace
+               :sym symbol?))
+
 (defn resolve
   [current-ns bindings local-env sym]
-  (restart-case (or
-                 (let [s (symbol (name sym))
-                       globals @global-env]
-                   (if (special-operator? s)
-                     s
-                     (if-let [ns (some-> sym
-                                         namespace
-                                         symbol)]
-                       (or (some #(get % sym) bindings)
-                           (and ((get-in globals [ns ::ns-publics]) s)
-                                (get-in globals [ns ::ns-map s]))
-                           (loop [reexported-ns (get-in globals [ns ::reexports s])]
-                             (when reexported-ns
-                               (or (and (contains? (get-in globals [reexported-ns ::ns-publics]) s)
-                                        (get-in globals [reexported-ns ::ns-map s]))
-                                   (recur (get-in globals [reexported-ns ::reexports s]))))))
-                       (or (get local-env s)
-                           (get-in globals [current-ns ::ns-map s])
-                           (loop [reexported-ns (get-in globals [current-ns ::reexports s])]
-                             (when reexported-ns
-                               (or (and (contains? (get-in globals [reexported-ns ::ns-publics]) s)
-                                        (get-in globals [reexported-ns ::ns-map s]))
-                                   (recur (get-in globals [reexported-ns ::reexports s])))))))))
-                 (far/error ::unresolved-symbol
-                            :symbol sym
-                            :current-ns current-ns
-                            :env local-env))
-                (::far/use-value [v] v)))
+  (restart-case
+      (let [s (symbol (name sym))
+            ns (some-> sym
+                       namespace
+                       symbol)
+            globals @global-env]
+        (cond
+          (special-operator? s) s
+          ns (if (contains? (get-in globals [current-ns ::ns-publics]) s)
+               (follow-reexports globals ns s)
+               (far/error ::unresolved-symbol
+                          :symbol sym
+                          :current-ns current-ns
+                          :env local-env))
+          s (let [local (get local-env s ::not-found)]
+              (cond
+                (not= ::not-found local) local
+                (in-ns? (get globals current-ns) s) (follow-reexports globals current-ns s)
+                :else (far/error ::unresolved-symbol
+                                 :symbol sym
+                                 :current-ns current-ns
+                                 :env local-env)))))
+    (::far/use-value [v] v)))
 (s/fdef resolve
   :args (s/cat :current-ns symbol?
                :bindings ::bindings
