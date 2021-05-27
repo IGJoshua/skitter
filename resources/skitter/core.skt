@@ -1,0 +1,30 @@
+;;; The main bootstrap file for skitter, as well as the standard library. This
+;;; file implicitly uses all the symbols from skitter.lang which are defined as
+;;; a part of the interpreter as builtins.
+
+(def fn (lit mac skitter.core {} [arglist & body]
+             (cons 'lit 'clo &ns &env arglist body)))
+
+(def mac (lit mac skitter.core {} [arglist & body]
+              (cons 'lit 'mac &ns &env arglist body)))
+
+(def list
+  (fn [& args]
+    args))
+
+(def defn (mac [name arglist & body]
+               (list 'def name (cons 'fn arglist body))))
+
+(defn first
+  [l]
+  (apply (fn [elt & _] elt) l))
+
+(defn rest
+  [l]
+  (apply (fn [_ & more] more) l))
+
+(defn reduce
+  [f init coll]
+  (if coll
+    (reduce (f init (first coll)) (rest coll))
+    init))
