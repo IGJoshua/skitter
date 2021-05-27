@@ -78,3 +78,7 @@
                 into args)
         (update ::r/expr-stack
                 conj [:call (inc (count args))]))))
+
+(defbuiltin read-string true
+  _ [s]
+  (read-string s))
