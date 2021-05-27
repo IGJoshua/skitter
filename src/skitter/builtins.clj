@@ -1,6 +1,9 @@
 (ns skitter.builtins
   (:require
-   [skitter.runtime :as r]))
+   [clojure.java.io :as io]
+   [skitter.runtime :as r])
+  (:import
+   (java.io PushbackReader)))
 
 (defmacro defcall
   [name reexport? arglist & body]
@@ -82,3 +85,16 @@
 (defbuiltin read-string true
   _ [s]
   (read-string s))
+
+(defcall load-file true
+  [cont _ [path]]
+  (let [reader (-> path
+                   io/resource
+                   io/reader
+                   PushbackReader.)
+        forms (take-while (complement #{::eof})
+                          (repeatedly #(try (read reader) (catch Exception _ ::eof))))]
+    (-> cont
+        (update ::r/expr-stack
+                conj [:expr (cons 'do forms)])
+        (update ::r/ns #(conj % (first %))))))
